@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Tum Se Tum Tak Sync Preview</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif}
+#stage{position:fixed;inset:0 0 90px 0;display:flex;align-items:center;justify-content:center;
+ font:700 clamp(40px,14vw,140px)/1.1 Georgia,serif;text-align:center;padding:0 5vw;word-break:break-word}
+#bar{position:fixed;bottom:0;left:0;right:0;height:90px;display:flex;gap:12px;align-items:center;padding:0 16px;background:#151519}
+audio{flex:1}#t{font-variant-numeric:tabular-nums;color:#D5D3D0;min-width:70px}
+.flag{color:#8F2637}
+</style></head><body>
+<div id="stage"></div>
+<div id="bar"><audio id="a" src="song.webm" controls></audio><span id="t">0.00</span></div>
+<script>
+let words=[];const a=document.getElementById('a'),s=document.getElementById('stage'),t=document.getElementById('t');
+fetch('word-timestamps.json').then(r=>r.json()).then(j=>words=j).catch(()=>s.textContent='Run the GitHub Action first to generate word-timestamps.json');
+let j=0;
+function tick(){const c=a.currentTime;t.textContent=c.toFixed(2);
+ if(words.length){ if(j>=words.length||words[j].start>c+0.5||(j&&words[j-1].start>c)) j=Math.max(0,words.findIndex(w=>w.end>c));
+  while(j<words.length&&words[j].end<=c)j++;
+  const w=words[j];const on=w&&w.start<=c&&c<w.end;
+  s.textContent=on?w.word:'';s.className=on&&w.review_required?'flag':'';}
+ requestAnimationFrame(tick)}
+tick();
+</script></body></html>
