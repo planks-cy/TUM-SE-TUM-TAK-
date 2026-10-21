@@ -2,12 +2,37 @@
 """Cinematic lyric motion-graphics renderer (deterministic: same timestamps -> same frames).
   python motion.py audio48.wav out/ out/cinematic.mp4 [--start S --end E]
 Reads out/word-timestamps.json + out/phrases.json. Words/timings are never altered."""
-import sys, json, math, subprocess, random
+import os, sys, json, math, subprocess, random, shutil
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H, FPS = 1080, 1920, 30
 BLACK, CHAR, SILVER, IVORY, CRIMSON = (5,5,6), (21,21,25), (213,211,208), (244,239,231), (143,38,55)
+
+
+def require_tool(name):
+    if shutil.which(name) is None:
+        raise SystemExit(f"Missing required tool: {name}. Install it before running motion.py.")
+
+
+def default_font_path(name, fallback):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
+    if name.lower().endswith("serif"):
+        for p in candidates[:2]:
+            if os.path.exists(p):
+                return p
+    if name.lower().endswith("sans"):
+        for p in candidates[2:]:
+            if os.path.exists(p):
+                return p
+    if os.path.exists(fallback):
+        return fallback
+    return fallback
 
 # ---------- easing ----------
 def clamp(x): return max(0.0, min(1.0, x))
@@ -17,14 +42,21 @@ def ease_back(x): x = clamp(x); c = 1.4; return 1 + (c+1)*(x-1)**3 + c*(x-1)**2
 
 # ---------- fonts ----------
 def find_font(names, fallback):
-    for n in names:
+    if shutil.which("fc-match"):
+        for n in names:
+            try:
+                p = subprocess.check_output(["fc-match", "-f", "%{file}", n], stderr=subprocess.DEVNULL).decode()
+                if n.split(":")[0].lower().split()[0] in p.lower(): return p
+            except Exception:
+                pass
         try:
-            p = subprocess.check_output(["fc-match", "-f", "%{file}", n], stderr=subprocess.DEVNULL).decode()
-            if n.split(":")[0].lower().split()[0] in p.lower(): return p
-        except Exception: pass
-    return subprocess.check_output(["fc-match", "-f", "%{file}", fallback]).decode()
-SERIF = find_font(["Cormorant Garamond:semibold", "Playfair Display"], "DejaVu Serif")
-SANS = find_font(["Inter", "Manrope"], "DejaVu Sans")
+            return subprocess.check_output(["fc-match", "-f", "%{file}", fallback], stderr=subprocess.DEVNULL).decode()
+        except Exception:
+            pass
+    return default_font_path(fallback, fallback)
+
+SERIF = find_font(["Cormorant Garamond:semibold", "Playfair Display"], "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+SANS = find_font(["Inter", "Manrope"], "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 _fc = {}
 def font(path, size):
     k = (path, size)
@@ -171,6 +203,12 @@ def layout(words, size_base):
 
 # ---------- main render ----------
 def render(audio, out, mp4, t0=None, t1=None):
+    require_tool("ffprobe")
+    require_tool("ffmpeg")
+    if not os.path.exists(audio):
+        raise SystemExit(f"Audio file not found: {audio}")
+    if not os.path.exists(f"{out}/word-timestamps.json") or not os.path.exists(f"{out}/phrases.json"):
+        raise SystemExit(f"Missing alignment output in {out}. Run the sync pipeline first.")
     words = json.load(open(f"{out}/word-timestamps.json")); phrases = json.load(open(f"{out}/phrases.json"))
     dur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", audio]))
     t0 = t0 or 0.0; t1 = t1 or dur; n = int(round((t1-t0)*FPS))
@@ -194,7 +232,7 @@ def render(audio, out, mp4, t0=None, t1=None):
         for q in act:
             o = clamp((t-q["out_s"])/q["od"]); pre = PRESETS[q["pre"]]; pdur = max(0.3, q["te"]-q["ts"])
             zoom = 1 + (0.07 if q["pre"] == "slow_scale" else 0.025) * clamp((t-q["ts"])/(pdur+1))
-            if q["motif"]: 
+            if q["motif"]:
                 tmp = Image.new("RGBA", (W, H), (0, 0, 0, 0)); motif(tmp, q["motif"], t, q["ts"], q["te"], q["box"])
                 layer.alpha_composite(with_alpha(tmp, 1-o))
             for i, it in enumerate(q["items"]):
@@ -226,7 +264,6 @@ def render(audio, out, mp4, t0=None, t1=None):
                 if prm["track"] is not None: px_adj = px - (wd - it["width"])/2
                 else: px_adj = px - (wd - it["width"]*sc)/2 if sc != 1 else px
                 layer.alpha_composite(with_alpha(im, prm["op"]), (int(px_adj - pad_s), int(py - asc_s)))
-        # camera shake-free: slow global drift already via zoom; compose
         f = background(t, leak)
         la = np.array(layer, np.float32); al = la[..., 3:4]/255
         f = f*(1-al) + la[..., :3]*al
@@ -234,5 +271,7 @@ def render(audio, out, mp4, t0=None, t1=None):
     p.stdin.close(); p.wait()
 
 if __name__ == "__main__":
+    if len(sys.argv) < 4:
+        raise SystemExit("Usage: python motion.py audio.wav out/ out/cinematic.mp4 [--start S --end E]")
     a = sys.argv; kw = {k: float(a[i+1]) for i, k in enumerate(a) if k in ("--start", "--end")}
     render(a[1], a[2], a[3], kw.get("--start"), kw.get("--end"))
