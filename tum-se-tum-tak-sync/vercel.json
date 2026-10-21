@@ -1,1 +1,6 @@
-{ "outputDirectory": "web", "buildCommand": null, "framework": null }
+{
+  "framework": "static",
+  "installCommand": "echo 'Static preview: no install step required'",
+  "buildCommand": "echo 'Static preview: no build step required'",
+  "outputDirectory": "web"
+}
